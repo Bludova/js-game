@@ -89,14 +89,7 @@ class Level {
     return this.actors.find((curActor) => actor.isIntersect(curActor));
   }
 
-  // obstacleAt(position, size) {
-  //   if (!(position instanceof Vector && size instanceof Vector)) {
-  //       throw new Error('Можно передавать только объекты типа Actor');
-  //   }
-
-  // }
-
-  obstacleAt(position, size) { //определяет, нет ли препятствия в указанном месте.
+  obstacleAt(position, size) {
     if (!(position instanceof Vector && size instanceof Vector)) {
       throw new Error(`Можно передавать только объекты типа Vector`);
     }
@@ -123,8 +116,190 @@ class Level {
     }
   }
 
-  removeActor(){
-
+//Метод removeActor удаляет переданный объект с игрового поля.
+  removeActor(actor) {
+      const index = this.actors.indexOf(actor);
+    if(index !== -1) {
+      this.actors.splice(index, 1);
+    }
   }
 
+
+// Определяет, остались ли еще объекты переданного типа на игровом поле.
+  noMoreActors(type) {
+    return !this.actors.some((actor) => actor.type === type);
+  }
+
+
+//Метод playerTouched Меняет состояние игрового поля при касании игроком каких-либо объектов или препятствий.
+  playerTouched(obstacle, touched) {
+    if (this.status !== null) {
+      return;
+    }
+
+    if(obstacle === 'lava' || obstacle === 'fireball') {
+      this.status = 'lost';
+    }
+
+    if(obstacle === 'coin') {
+      this.removeActor(touched);
+      if(this.noMoreActors('coin')) {
+        this.status = 'won';
+      }
+    }
+  }
 }
+ // Парсер уровня
+
+class LevelParser {
+  constructor(dictionaryObjects) {
+    this.dictionaryObjects = dictionaryObjects;
+  }
+
+  actorFromSymbol(symbolString = undefined) {
+    if(this.dictionaryObjects !== undefined) {
+      return this.dictionaryObjects[symbolString];
+    }
+  }
+
+  obstacleFromSymbol(symbolString = undefined) {
+    if(symbolString ==='x') {
+      return 'wall';
+    }
+    if(symbolString === '!') {
+      return 'lava';
+    }
+  }
+
+  createGrid(symbolString = []) {
+    return symbolString.map(row => row.split('').map(symbol => this.obstacleFromSymbol(symbol)));
+  }
+
+  createActors(arr) {
+    const actors = [];
+    for (let i = 0; i < arr.length; i++) {
+      for (let j = 0; j < arr[i].length; j++) {
+        const actor = this.actorFromSymbol(arr[i].charAt(j));
+        if (typeof actor === 'function') {
+          const instance = new actor(new Vector(j, i));
+          if (instance instanceof Actor) {
+            actors.push(instance);
+          }
+        }
+      }
+    }
+    return actors;
+  }
+
+  parse(arr) {
+   return new Level(this.createGrid(arr), this.createActors(arr));
+  }
+}
+
+class Fireball extends Actor {
+  constructor(pos = new Vector(0,0), speed = new Vector(0,0)) {
+    super(pos, new Vector(1,1), speed);
+  }
+
+  get type() {
+    return 'fireball';
+  }
+
+  getNextPosition(time = 1) {
+    return this.pos.plus(this.speed.times(time));
+  }
+
+  handleObstacle() {
+    this.speed = this.speed.times(-1);
+  }
+
+  act(time, playingField) {
+    const nextPosition = this.getNextPosition(time);
+    if(playingField.obstacleAt(nextPosition, this.size)) {
+      this.handleObstacle();
+    } else {
+      this.pos = nextPosition;
+    }
+  }
+}
+
+class HorizontalFireball extends Fireball {
+  constructor(pos) {
+    super(pos, new Vector(2,0));
+  }
+}
+
+class VerticalFireball extends Fireball {
+  constructor(pos) {
+    super(pos, new Vector(0, 2));
+  }
+}
+
+class FireRain extends Fireball {
+  constructor(pos) {
+    super(pos, new Vector(0, 3));
+    this.initialPos = this.pos;
+  }
+
+  handleObstacle() {
+    this.pos = this.initialPos;
+  }
+}
+
+class Coin extends Actor {
+  constructor(pos = new Vector(0, 0)) {
+    super(pos.plus(new Vector(0.2, 0.1)), new Vector(0.6, 0.6));
+    this.initialPos = this.pos;
+    this.springSpeed = 8;
+    this.springDist = 0.07;
+    this.spring = Math.random() * Math.PI * 2;
+  }
+
+  get type() {
+    return 'coin';
+  }
+
+  updateSpring(time = 1) {
+    this.spring = this.spring + this.springSpeed * time;
+  }
+
+  getSpringVector() {
+    return new Vector(0, Math.sin(this.spring) * this.springDist);
+  }
+
+  getNextPosition(time = 1) {
+    this.spring += this.springSpeed * time;
+    return this.initialPos.plus(this.getSpringVector());
+  }
+
+  act(time) {
+    this.pos = this.getNextPosition(time);
+  }
+}
+
+class Player extends Actor {
+  constructor(pos = new Vector(0, 0)) {
+    super(pos.plus(new Vector(0, -0.5)), new Vector(0.8, 1.5));
+  }
+
+  get type() {
+    return 'player';
+  }
+}
+
+const actorDict = {
+    '@': Player,
+    'v': FireRain,
+    'o': Coin,
+    '=': HorizontalFireball,
+    '|': VerticalFireball
+}
+
+const parser = new LevelParser(actorDict);
+
+loadLevels().then(levelsStr => {
+  const levels = JSON.parse(levelsStr);
+  return runGame(levels, parser, DOMDisplay);
+}).then(() => {
+  alert('Победа!!!')
+});
